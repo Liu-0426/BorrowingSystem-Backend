@@ -1,3 +1,4 @@
+
 package main
 
 import (
@@ -22,7 +23,6 @@ type User struct {
 
 type Item struct {
 	ID          int       `json:"id"`
-	OwnerID     int       `json:"owner_id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	Status      string    `json:"status"`
@@ -90,6 +90,7 @@ func main() {
 
 		if loginData.Username == "" || loginData.Password == "" {
 			c.JSON(400, gin.H{"error": "Username and password cannot be empty"})
+			fmt.Printf("Login with empty data")
 			return
 		}
 
@@ -173,7 +174,7 @@ func main() {
 	// Existing GET items endpoint
 	r.GET("/items", func(c *gin.Context) {
 		var items []Item
-		rows, err := db.Query("SELECT id, owner_id, name, description, status, created_at, updated_at FROM items")
+		rows, err := db.Query("SELECT id, name, description, status, created_at, updated_at FROM items")
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to fetch items"})
 			return
@@ -183,7 +184,7 @@ func main() {
 		for rows.Next() {
 			var item Item
 			var createdAtRaw, updatedAtRaw []byte
-			err := rows.Scan(&item.ID, &item.OwnerID, &item.Name, &item.Description, &item.Status, &createdAtRaw, &updatedAtRaw)
+			err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Status, &createdAtRaw, &updatedAtRaw)
 			if err != nil {
 				log.Printf("Error scanning item: %v", err)
 				c.JSON(500, gin.H{"error": "Failed to scan item"})
@@ -216,135 +217,279 @@ func main() {
 	})
 
 	// New endpoint to create an item
+	// 新增項目
 	r.POST("/items", func(c *gin.Context) {
 		var item Item
 		if err := c.ShouldBindJSON(&item); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid JSON payload", "details": err.Error()})
+			c.JSON(400, gin.H{"error": "無效的 JSON 載荷", "details": err.Error()})
 			return
 		}
 
-		// 打印接收到的資料
-		fmt.Printf("Received item data: %+v\n", item)
+		fmt.Printf("接收到的項目數據: %+v\n", item)
 
-		// 檢查 owner_id 是否存在於 users 表中
-		var userExists bool
-		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", item.OwnerID).Scan(&userExists)
+		// 確保 status 欄位值有效
+		validStatuses := map[string]bool{
+			"available": true,
+			"borrowed":  true,
+		}
+		if !validStatuses[item.Status] {
+			c.JSON(400, gin.H{"error": "無效的 status 值"})
+			return
+		}
+
+		_, err = db.Exec("INSERT INTO items (name, description, status, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())", item.Name, item.Description, item.Status)
 		if err != nil {
-			log.Printf("Error checking user existence: %v", err)
-			c.JSON(500, gin.H{"error": "Failed to check user existence", "details": err.Error()})
+			log.Printf("將項目插入數據庫時發生錯誤: %v", err)
+			c.JSON(500, gin.H{"error": "創建項目失敗", "details": err.Error()})
 			return
 		}
 
-		if !userExists {
-			c.JSON(400, gin.H{"error": "Invalid owner_id"})
-			return
-		}
-
-		_, err = db.Exec("INSERT INTO items (owner_id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())", item.OwnerID, item.Name, item.Description, item.Status)
-		if err != nil {
-			log.Printf("Error inserting item into database: %v", err)
-			c.JSON(500, gin.H{"error": "Failed to create item", "details": err.Error()})
-			return
-		}
-
-		c.JSON(200, gin.H{"message": "Item created successfully"})
+		c.JSON(200, gin.H{"message": "項目創建成功"})
 	})
 
 	// New endpoint to update an item
+	// 更新項目
 	r.PUT("/items/:id", func(c *gin.Context) {
 		var item Item
 		if err := c.ShouldBindJSON(&item); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid JSON payload", "details": err.Error()})
+			c.JSON(400, gin.H{"error": "無效的 JSON 載荷", "details": err.Error()})
+			return
+		}
+		fmt.Printf("接收到的PUT: %+v\n", item)
+
+		itemID := c.Param("id")
+
+		// 確保 status 欄位值有效
+		validStatuses := map[string]bool{
+			"available": true,
+			"borrowed":  true,
+		}
+		if !validStatuses[item.Status] {
+			c.JSON(400, gin.H{"error": "無效的 status 值"})
 			return
 		}
 
-		fmt.Printf("Received item data for update: %+v\n", item)
-
-		itemId := c.Param("id")
-
-		var userExists bool
-		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", item.OwnerID).Scan(&userExists)
+		_, err := db.Exec("UPDATE items SET name = ?, description = ?, status = ?, updated_at = NOW() WHERE id = ?", item.Name, item.Description, item.Status, itemID)
 		if err != nil {
-			log.Printf("Error checking user existence: %v", err)
-			c.JSON(500, gin.H{"error": "Failed to check user existence", "details": err.Error()})
+			log.Printf("更新項目數據庫時發生錯誤: %v", err)
+			c.JSON(500, gin.H{"error": "更新項目失敗", "details": err.Error()})
 			return
 		}
 
-		if !userExists {
-			c.JSON(400, gin.H{"error": "Invalid owner_id"})
-			return
-		}
-
-		_, err = db.Exec("UPDATE items SET owner_id = ?, name = ?, description = ?, status = ?, updated_at = NOW() WHERE id = ?", item.OwnerID, item.Name, item.Description, item.Status, itemId)
-		if err != nil {
-			log.Printf("Error updating item in database: %v", err)
-			c.JSON(500, gin.H{"error": "Failed to update item", "details": err.Error()})
-			return
-		}
-
-		c.JSON(200, gin.H{"message": "Item updated successfully"})
+		c.JSON(200, gin.H{"message": "項目更新成功"})
 	})
 
 	// New endpoint to delete an item
+	// 刪除項目
 	r.DELETE("/items/:id", func(c *gin.Context) {
-		id := c.Param("id")
+		itemID := c.Param("id")
 
-		_, err := db.Exec("DELETE FROM items WHERE id = ?", id)
+		_, err := db.Exec("DELETE FROM items WHERE id = ?", itemID)
 		if err != nil {
-			log.Printf("Error deleting item from database: %v", err)
-			c.JSON(500, gin.H{"error": "Failed to delete item"})
+			log.Printf("從數據庫中刪除項目時發生錯誤: %v", err)
+			c.JSON(500, gin.H{"error": "刪除項目失敗", "details": err.Error()})
 			return
 		}
 
-		c.JSON(200, gin.H{"message": "Item deleted successfully"})
+		c.JSON(200, gin.H{"message": "項目刪除成功"})
 	})
 
-	// New endpoint to search items
+	// Existing GET items/search endpoint
 	r.GET("/items/search", func(c *gin.Context) {
-		query := c.Query("q")
+		term := c.Query("term")
+	
 		var items []Item
-		searchQuery := "%" + query + "%"
-		rows, err := db.Query("SELECT id, owner_id, name, description, status, created_at, updated_at FROM items WHERE name LIKE ? OR description LIKE ?", searchQuery, searchQuery)
+		rows, err := db.Query("SELECT id, name, description, status, created_at, updated_at FROM items WHERE name LIKE ?", "%"+term+"%")
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to search items"})
 			return
 		}
 		defer rows.Close()
-
+	
 		for rows.Next() {
 			var item Item
 			var createdAtRaw, updatedAtRaw []byte
-			err := rows.Scan(&item.ID, &item.OwnerID, &item.Name, &item.Description, &item.Status, &createdAtRaw, &updatedAtRaw)
+			err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Status, &createdAtRaw, &updatedAtRaw)
 			if err != nil {
 				log.Printf("Error scanning item: %v", err)
 				c.JSON(500, gin.H{"error": "Failed to scan item"})
 				return
 			}
-
+	
 			item.CreatedAt, err = time.Parse("2006-01-02 15:04:05", string(createdAtRaw))
 			if err != nil {
 				log.Printf("Error parsing created_at: %v", err)
 				c.JSON(500, gin.H{"error": "Failed to parse created_at"})
 				return
 			}
-
+	
 			item.UpdatedAt, err = time.Parse("2006-01-02 15:04:05", string(updatedAtRaw))
 			if err != nil {
 				log.Printf("Error parsing updated_at: %v", err)
 				c.JSON(500, gin.H{"error": "Failed to parse updated_at"})
 				return
 			}
-
+	
 			items = append(items, item)
 		}
-
+	
 		if err := rows.Err(); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to iterate items"})
 			return
 		}
-
+	
 		c.JSON(200, items)
 	})
 
+	// 新增端點來回傳使用者列表
+	r.GET("/users", func(c *gin.Context) {
+		role := c.Query("role")
+	
+		var users []User
+		var rows *sql.Rows
+		var err error
+	
+		if role == "" {
+			rows, err = db.Query("SELECT id, username, role FROM users")
+		} else {
+			rows, err = db.Query("SELECT id, username, role FROM users WHERE role = ?", role)
+		}
+	
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to fetch users"})
+			return
+		}
+		defer rows.Close()
+	
+		for rows.Next() {
+			var user User
+			err := rows.Scan(&user.ID, &user.Username, &user.Role)
+			if err != nil {
+				log.Printf("Error scanning user: %v", err)
+				c.JSON(500, gin.H{"error": "Failed to scan user"})
+				return
+			}
+			users = append(users, user)
+		}
+	
+		if err := rows.Err(); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to iterate users"})
+			return
+		}
+	
+		c.JSON(200, users)
+	})
+
+	// New endpoint to borrow an item
+	r.POST("/borrow", func(c *gin.Context) {
+		var requestData struct {
+			ItemID       int    `json:"item_id"`
+			AdminUsername string `json:"admin_username"`
+			Password     string `json:"password"`
+		}
+	
+		if err := c.ShouldBindJSON(&requestData); err != nil {
+			fmt.Println(err.Error())
+			c.JSON(400, gin.H{"error": "無效的 JSON 載荷", "details": err.Error()})
+			return
+		}
+		fmt.Printf("接收到的借用請求: %+v\n", requestData)
+	
+		// 驗證管理員密碼
+		var adminPasswordHash string
+		err := db.QueryRow("SELECT password FROM users WHERE username = 'admin'").Scan(&adminPasswordHash)
+		if err != nil {
+			log.Printf("查詢管理員密碼時發生錯誤: %v", err)
+			c.JSON(500, gin.H{"error": "查詢管理員密碼失敗", "details": err.Error()})
+			return
+		}
+	
+		err = bcrypt.CompareHashAndPassword([]byte(adminPasswordHash), []byte(requestData.Password))
+		if err != nil {
+			log.Printf("管理員密碼不正確: %v", err)
+			c.JSON(401, gin.H{"error": "管理員密碼不正確"})
+			return
+		}
+	
+		// 查詢項目狀態
+		var status string
+		err = db.QueryRow("SELECT status FROM items WHERE id = ?", requestData.ItemID).Scan(&status)
+		if err != nil {
+			log.Printf("查詢項目狀態時發生錯誤: %v", err)
+			c.JSON(500, gin.H{"error": "查詢項目狀態失敗", "details": err.Error()})
+			return
+		}
+	
+		if status == "borrowed" {
+			c.JSON(400, gin.H{"error": "該項目已被借出"})
+			return
+		}
+	
+		// 更新項目狀態
+		_, err = db.Exec("UPDATE items SET status = 'borrowed', updated_at = NOW() WHERE id = ?", requestData.ItemID)
+		if err != nil {
+			log.Printf("更新項目狀態時發生錯誤: %v", err)
+			c.JSON(500, gin.H{"error": "更新項目狀態失敗", "details": err.Error()})
+			return
+		}
+	
+		c.JSON(200, gin.H{"message": "項目狀態已更新為借出"})
+	})
+	r.POST("/return", func(c *gin.Context) {
+		var requestData struct {
+			ItemID     int    `json:"item_id"`
+			Password   string `json:"password"`
+		}
+		
+		if err := c.ShouldBindJSON(&requestData); err != nil {
+			fmt.Println(err.Error())
+			c.JSON(400, gin.H{"error": "無效的 JSON 載荷", "details": err.Error()})
+			return
+		}
+		fmt.Printf("接收到的歸還請求: %+v\n", requestData)
+	
+		// 驗證管理員密碼
+		var adminPasswordHash string
+		err := db.QueryRow("SELECT password FROM users WHERE username = 'admin'").Scan(&adminPasswordHash)
+		if err != nil {
+			log.Printf("查詢管理員密碼時發生錯誤: %v", err)
+			c.JSON(500, gin.H{"error": "查詢管理員密碼失敗", "details": err.Error()})
+			return
+		}
+	
+		err = bcrypt.CompareHashAndPassword([]byte(adminPasswordHash), []byte(requestData.Password))
+		if err != nil {
+			log.Printf("管理員密碼不正確: %v", err)
+			c.JSON(401, gin.H{"error": "管理員密碼不正確"})
+			return
+		}
+	
+		// 查詢項目狀態
+		var status string
+		err = db.QueryRow("SELECT status FROM items WHERE id = ?", requestData.ItemID).Scan(&status)
+		if err != nil {
+			log.Printf("查詢項目狀態時發生錯誤: %v", err)
+			c.JSON(500, gin.H{"error": "查詢項目狀態失敗", "details": err.Error()})
+			return
+		}
+	
+		if status != "borrowed" {
+			c.JSON(400, gin.H{"error": "該項目未被借出"})
+			return
+		}
+	
+		// 更新項目狀態
+		_, err = db.Exec("UPDATE items SET status = 'available', updated_at = NOW() WHERE id = ?", requestData.ItemID)
+		if err != nil {
+			log.Printf("更新項目狀態時發生錯誤: %v", err)
+			c.JSON(500, gin.H{"error": "更新項目狀態失敗", "details": err.Error()})
+			return
+		}
+	
+		c.JSON(200, gin.H{"message": "項目狀態已更新為可用"})
+	})
+	
+
+	
 	r.Run(":8080")
 }
