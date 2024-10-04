@@ -5,16 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	
+
 	"strconv"
 	"time"
+
+	"crypto/tls"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/bcrypt"
-	"crypto/tls"
 	"gopkg.in/gomail.v2"
 )
 
@@ -121,7 +122,7 @@ func main() {
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://172.24.8.156:3000"},
+		AllowOrigins:     []string{"http://172.24.8.156"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -254,7 +255,7 @@ func main() {
 			var item Item
 			var createdAtRaw, updatedAtRaw []byte
 			var borrower sql.NullString
-			err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Status, 
+			err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Status,
 				&createdAtRaw, &updatedAtRaw, &item.BorrowerID, &borrower)
 			if err != nil {
 				log.Printf("Error scanning item: %v", err)
@@ -374,7 +375,7 @@ func main() {
 	// Existing GET items/search endpoint
 	r.GET("/items/search", func(c *gin.Context) {
 		term := c.Query("term")
-	
+
 		var items []Item
 		rows, err := db.Query("SELECT id, name, description, status, created_at, updated_at, borrower_id FROM items WHERE name LIKE ?", "%"+term+"%")
 		if err != nil {
@@ -382,7 +383,7 @@ func main() {
 			return
 		}
 		defer rows.Close()
-	
+
 		for rows.Next() {
 			var item Item
 			var createdAtRaw, updatedAtRaw []byte
@@ -392,52 +393,52 @@ func main() {
 				c.JSON(500, gin.H{"error": "Failed to scan item"})
 				return
 			}
-	
+
 			item.CreatedAt, err = time.Parse("2006-01-02 15:04:05", string(createdAtRaw))
 			if err != nil {
 				log.Printf("Error parsing created_at: %v", err)
 				c.JSON(500, gin.H{"error": "Failed to parse created_at"})
 				return
 			}
-	
+
 			item.UpdatedAt, err = time.Parse("2006-01-02 15:04:05", string(updatedAtRaw))
 			if err != nil {
 				log.Printf("Error parsing updated_at: %v", err)
 				c.JSON(500, gin.H{"error": "Failed to parse updated_at"})
 				return
 			}
-	
+
 			items = append(items, item)
 		}
-	
+
 		if err := rows.Err(); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to iterate items"})
 			return
 		}
-	
+
 		c.JSON(200, items)
 	})
 
 	// 新增端點來回傳使用者列表
 	r.GET("/users", func(c *gin.Context) {
 		role := c.Query("role")
-	
+
 		var users []User
 		var rows *sql.Rows
 		var err error
-	
+
 		if role == "" {
 			rows, err = db.Query("SELECT id, username, role FROM users")
 		} else {
 			rows, err = db.Query("SELECT id, username, role FROM users WHERE role = ?", role)
 		}
-	
+
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to fetch users"})
 			return
 		}
 		defer rows.Close()
-	
+
 		for rows.Next() {
 			var user User
 			err := rows.Scan(&user.ID, &user.Username, &user.Role)
@@ -448,22 +449,22 @@ func main() {
 			}
 			users = append(users, user)
 		}
-	
+
 		if err := rows.Err(); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to iterate users"})
 			return
 		}
-	
+
 		c.JSON(200, users)
 	})
 
 	// New endpoint to borrow an item
 	r.POST("/borrow", func(c *gin.Context) {
 		var requestData struct {
-			ItemID     int       `json:"item_id"`
-			AdminID    string    `json:"admin_id"`
-			BorrowerID string    `json:"borrower_id"`
-			Password   string    `json:"password"`
+			ItemID     int    `json:"item_id"`
+			AdminID    string `json:"admin_id"`
+			BorrowerID string `json:"borrower_id"`
+			Password   string `json:"password"`
 		}
 
 		if err := c.ShouldBindJSON(&requestData); err != nil {
@@ -537,14 +538,14 @@ func main() {
 			ItemID   int    `json:"item_id"`
 			Password string `json:"password"`
 		}
-	
+
 		if err := c.ShouldBindJSON(&requestData); err != nil {
 			fmt.Println(err.Error())
 			c.JSON(400, gin.H{"error": "無效的 JSON 載荷", "details": err.Error()})
 			return
 		}
 		fmt.Printf("接收到的歸還請求: %+v\n", requestData)
-	
+
 		// 驗證管理員密碼
 		var adminPasswordHash string
 		err := db.QueryRow("SELECT password FROM users WHERE username = 'admin'").Scan(&adminPasswordHash)
@@ -553,14 +554,14 @@ func main() {
 			c.JSON(500, gin.H{"error": "查詢管理員密碼失敗", "details": err.Error()})
 			return
 		}
-	
+
 		err = bcrypt.CompareHashAndPassword([]byte(adminPasswordHash), []byte(requestData.Password))
 		if err != nil {
 			log.Printf("管理員密碼不正確: %v", err)
 			c.JSON(401, gin.H{"error": "管理員密碼不正確"})
 			return
 		}
-	
+
 		// 查詢項目狀態
 		var status string
 		err = db.QueryRow("SELECT status FROM items WHERE id = ?", requestData.ItemID).Scan(&status)
@@ -569,12 +570,12 @@ func main() {
 			c.JSON(500, gin.H{"error": "查詢項目狀態失敗", "details": err.Error()})
 			return
 		}
-	
+
 		if status != "borrowed" {
 			c.JSON(400, gin.H{"error": "該項目未被借出"})
 			return
 		}
-	
+
 		// 更新項目狀態
 		_, err = db.Exec("UPDATE items SET status = 'available', borrower_id = NULL, updated_at = NOW() WHERE id = ?", requestData.ItemID)
 		if err != nil {
@@ -582,7 +583,7 @@ func main() {
 			c.JSON(500, gin.H{"error": "更新項目狀態失敗", "details": err.Error()})
 			return
 		}
-	
+
 		c.JSON(200, gin.H{"message": "項目狀態已更新為可用"})
 	})
 	r.POST("/reminder", func(c *gin.Context) {
@@ -627,8 +628,6 @@ func main() {
 
 		c.JSON(200, gin.H{"message": "催還郵件已發送"})
 	})
-	
 
-	
 	r.Run(":8080")
 }
