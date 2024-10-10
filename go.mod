@@ -1,6 +1,8 @@
 module borrowing-system
 
-go 1.18
+go 1.23
+
+toolchain go1.23.2
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
@@ -21,7 +23,7 @@ require (
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/gorilla/context v1.1.2 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
-	github.com/gorilla/sessions v1.2.2 // indirect
+	github.com/gorilla/sessions v1.4.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
