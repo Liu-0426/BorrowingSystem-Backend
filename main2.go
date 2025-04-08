@@ -93,8 +93,8 @@ func generateJWT(username string) (string, error) {
 
 func sendEmail(to string, subject string, body string) error {
 	from := "nmg@cs.thu.edu.tw"
-	password := "e04su3su;6"
-	smtpHost := "140.128.101.5"
+	password := "/"
+	smtpHost := "/"
 	smtpPort := 587
 
 	m := gomail.NewMessage()
